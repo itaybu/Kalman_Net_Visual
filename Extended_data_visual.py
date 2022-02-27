@@ -66,9 +66,9 @@ class H_fully_connected(nn.Module):
     def __init__(self, weights, bias):
         super(H_fully_connected, self).__init__()
         self.fc = nn.Linear(2, 5)
-        #with torch.no_grad():
-        self.fc.weight.copy_(weights)
-        self.fc.bias.copy_(bias.reshape(bias.shape[0]))
+        with torch.no_grad():
+            self.fc.weight.copy_(weights)
+            self.fc.bias.copy_(bias.reshape(bias.shape[0]))
         #self.fc2 = nn.Linear(10, 5)
 
     def forward(self, x):

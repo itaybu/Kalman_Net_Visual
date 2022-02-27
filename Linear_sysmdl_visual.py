@@ -6,7 +6,7 @@ from PIL import Image
 
 class SystemModel:
 
-    def __init__(self, F, q, H_fc, model_AE_trained, r, T, T_test, outlier_p=0,rayleigh_sigma=10000):
+    def __init__(self, F, q, H_matrix_fix, r, T, T_test, outlier_p=0,rayleigh_sigma=10000):
 
         self.outlier_p = outlier_p
         self.rayleigh_sigma = rayleigh_sigma
@@ -22,8 +22,7 @@ class SystemModel:
         #########################
         ### Observation Model ###
         #########################
-        #self.H_fc = H_fc
-        #self.AE_model = model_AE_trained
+        self.H_matrix_fix = H_matrix_fix
         self.n = y_size*y_size
         self.d = decoaded_dimention
 

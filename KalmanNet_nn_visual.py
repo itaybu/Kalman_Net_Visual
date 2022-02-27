@@ -18,9 +18,9 @@ class KalmanNetNN(torch.nn.Module):
     #############
     ### Build ###
     #############
-    def Build(self, ssModel, h_fully_connected,model_AE_trained):
+    def Build(self, ssModel, h_fully_connected):
 
-        self.InitSystemDynamics(ssModel.F, h_fully_connected) #entering new H
+        self.InitSystemDynamics(ssModel.F, h_fully_connected, ssModel.H_matrix_fix) #entering new H
 
         # Number of neurons in the 1st hidden layer
         H1_KNet = ssModel.m + ssModel.d
@@ -30,12 +30,12 @@ class KalmanNetNN(torch.nn.Module):
         H2_KNet = (ssModel.m * ssModel.n)
 
         self.InitKGainNet(H1_KNet, H2_KNet)
-        self.model_AE = model_AE_trained
 
     ######################################
     ### Initialize Kalman Gain Network ###
     ######################################
     def InitKGainNet(self, H1, H2):
+        torch.manual_seed(0)
         # Input Dimensions
         D_in = self.m + self.d  # x(t-1), y(t)
         # self.m + self.n
@@ -96,7 +96,7 @@ class KalmanNetNN(torch.nn.Module):
     ##################################
     ### Initialize System Dynamics ###
     ##################################
-    def InitSystemDynamics(self, F, H):
+    def InitSystemDynamics(self, F, H_FC, H_matrix_fix):
         # Set State Evolution Matrix
         self.F = F.to(self.device,non_blocking = True)
         self.F_T = torch.transpose(F, 0, 1)
@@ -104,9 +104,9 @@ class KalmanNetNN(torch.nn.Module):
         self.d = decoaded_dimention
 
         # Set Observation Matrix
-        self.H_FC = H
+        self.H_FC = H_FC
+        self.H_matrix_fix = H_matrix_fix
         #H.to(self.device,non_blocking = True)
-        #self.H_T = torch.transpose(H, 0, 1)
         self.n = y_size*y_size
 
     ###########################
@@ -123,28 +123,26 @@ class KalmanNetNN(torch.nn.Module):
     ######################
     ### Compute Priors ###
     ######################
-    def step_prior(self):
+    def step_prior(self,fix_H_flag):
 
         # Compute the 1-st moment of x based on model knowledge and without process noise
         self.state_process_prior_0 = torch.matmul(self.F, self.state_process_posterior_0)
-
-        # Compute the 1-st moment of y based on model knowledge and without noise
-        # H is learned FC
-        self.H_FC.eval()
-        self.obs_process_0 = self.H_FC(self.state_process_prior_0.reshape(1, self.m))
-        # H is known matrix
-        #self.obs_process_0 = torch.matmul(self.H_vis, self.state_process_prior_0)
 
         # Predict the 1-st moment of x
         self.m1x_prev_prior = self.m1x_prior
         self.m1x_prior = torch.matmul(self.F, self.m1x_posterior)
 
-        # Predict the 1-st moment of y
-        # H is learned FC
-        self.H_FC.eval()
-        self.m1y = self.H_FC(self.m1x_prior.reshape(1, self.m)).reshape(self.d, 1)
-        # H is known matrix
-        #self.m1y = torch.matmul(self.H_vis, self.m1x_prior)
+        if fix_H_flag:
+            # Compute the 1-st moment of y based on model knowledge and without noise
+            self.obs_process_0 = torch.matmul(self.H_matrix_fix, self.state_process_prior_0)
+            # Predict the 1-st moment of y
+            self.m1y = torch.matmul(self.H_matrix_fix, self.m1x_prior)
+        else:# H is learned FC
+            # Compute the 1-st moment of y based on model knowledge and without noise
+            self.H_FC.eval()
+            self.obs_process_0 = self.H_FC(self.state_process_prior_0.reshape(1, self.m))
+            # Predict the 1-st moment of y
+            self.m1y = self.H_FC(self.m1x_prior.reshape(1, self.m)).reshape(self.d, 1)
 
     ##############################
     ### Kalman Gain Estimation ###
@@ -175,10 +173,9 @@ class KalmanNetNN(torch.nn.Module):
     #######################
     ### Kalman Net Step ###
     #######################
-    def KNet_step(self, y):
+    def KNet_step(self, y, fix_H_flag):
         # Compute Priors
-        self.step_prior()
-    # h=fhfhfsdhdh function
+        self.step_prior(fix_H_flag)
         # Compute Kalman Gain
         self.step_KGain_est(y)
 
@@ -227,11 +224,9 @@ class KalmanNetNN(torch.nn.Module):
     ###############
     ### Forward ###
     ###############
-    def forward(self, yt):
+    def forward(self, yt, fix_H_flag):
         yt = yt.to(self.device,non_blocking = True)
-        AE_input = yt.reshape((1, len(yt)))
-        y_cv_decoaded_t = self.model_AE(AE_input)[0].squeeze()
-        return self.KNet_step(y_cv_decoaded_t)
+        return self.KNet_step(yt, fix_H_flag)
 
     #########################
     ### Init Hidden State ###

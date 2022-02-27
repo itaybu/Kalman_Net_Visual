@@ -68,7 +68,6 @@ def test_epoch(encoder, decoder, val_loader, loss_fn, epoch,  flag_only_encoder)
 
 def train(model, H_data_train,H_data_valid, num_epochs, batch_size, learning_rate):
     torch.manual_seed(42)
-    #criterion_x = nn.MSELoss()
     criterion_y = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-5)
     train_loader = torch.utils.data.DataLoader(H_data_train, batch_size=batch_size, shuffle=True)
@@ -132,8 +131,8 @@ class Autoencoder(nn.Module):
         return x_bottom,y_rec
 
 class Encoder(nn.Module):
-    def __init__(self, encoded_space_dim, fc2_input_dim):
-        super().__init__()
+    def __init__(self, encoded_space_dim):
+        super(Encoder, self).__init__()
         ### Convolutional section
         self.encoder_cnn = nn.Sequential(
             nn.Conv2d(1, 8, 3, stride=2, padding=1),
@@ -162,8 +161,8 @@ class Encoder(nn.Module):
         return x
 
 class Decoder(nn.Module):
-    def __init__(self, encoded_space_dim, fc2_input_dim):
-        super().__init__()
+    def __init__(self, encoded_space_dim):
+        super(Decoder, self).__init__()
         self.decoder_lin = nn.Sequential(
             nn.Linear(encoded_space_dim, 32),
             nn.ReLU(True),
@@ -186,7 +185,7 @@ class Decoder(nn.Module):
         x = self.decoder_lin(x)
         x = self.unflatten(x)
         x = self.decoder_conv(x)
-        x = torch.sigmoid(x)
+        #x = torch.sigmoid(x)
         return x
 
 def check_learning_process(img_batch,recon_batch,epoch, name):
@@ -247,12 +246,11 @@ def load_pendulum_npz(path):
     return file_np
 
 def training_AE_conv(flag_only_encoder):
-    imgs_np = load_pendulum_npz(r'.\Simulations\Pendulum\imgs.npz')
-    noisy_imgs_np = load_pendulum_npz(r'.\Simulations\Pendulum\noisy_imgs.npz')
-    states_np = load_pendulum_npz(r'.\Simulations\Pendulum\states.npz')
+    [train_input, train_target, cv_input, cv_target, test_input, test_target] = DataLoader_GPU(r'.\Simulations\Pendulum\y24x24_Ttrain30_NE1000_NCV100_NT100_Ttest40_pendulum_train_encoder.pt')
 
     #check_learning_process(imgs_np, noisy_imgs_np, 1, 1)
-
+    imgs_np=train_input.cpu().detach().numpy()
+    states_np=train_target.cpu().detach().numpy()
     train_list=[]
     for k in range(imgs_np.shape[0]):
         sample=imgs_np[k]
@@ -261,34 +259,36 @@ def training_AE_conv(flag_only_encoder):
             train_list.append(img)
 
     if flag_only_encoder:
-        chosen_targets_np=states_np
+        chosen_targets_np= states_np
+        targets_list = []
+        for k in range(chosen_targets_np.shape[0]):
+            sample = chosen_targets_np[k]
+            for t in range(sample.shape[0]):
+                target = sample[t]
+                targets_list.append(target)
     else:
-        chosen_targets_np = imgs_np
+        targets_list=train_list
 
-    targets_list=[]
-    for k in range(chosen_targets_np.shape[0]):
-        sample=chosen_targets_np[k]
-        for t in range(sample.shape[0]):
-            target=sample[t]
-            targets_list.append(target)
-
-    lr = 0.0002
+    lr = 1e-3
+    wd = 1e-4
     torch.manual_seed(0)
-    d = 2
-    num_epochs=30
+    d = 5
+    num_epochs=50
     batch_size=256
+    N_train= int(len(train_list)*0.7)
+    N_val = int((len(train_list)-N_train)/2)
 
-    data_train = train_list[22500:]
-    targets_train = targets_list[22500:]
+    data_train = train_list[:N_train]
+    targets_train = targets_list[:N_train]
     dataset_train=[]
-    data_val_test = train_list[:22500]
-    targets_val_test = targets_list[:22500]
+    data_val_test = train_list[N_train:]
+    targets_val_test = targets_list[N_train:]
 
-    data_val = data_val_test[:10000]
-    targets_val = targets_val_test[:10000]
+    data_val = data_val_test[:N_val]
+    targets_val = targets_val_test[:N_val]
     dataset_val = []
-    data_test = data_val_test[10000:]
-    targets_test = targets_val_test[10000:]
+    data_test = data_val_test[N_val:]
+    targets_test = targets_val_test[N_val:]
     dataset_test = []
 
     for k in range(len(data_train)):
@@ -303,10 +303,10 @@ def training_AE_conv(flag_only_encoder):
     test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=batch_size)
 
     loss_fn = torch.nn.MSELoss()
-    encoder = Encoder(encoded_space_dim=d, fc2_input_dim=128)
-    decoder = Decoder(encoded_space_dim=d, fc2_input_dim=128)
+    encoder = Encoder(encoded_space_dim=d)
+    decoder = Decoder(encoded_space_dim=d)
     params_to_optimize = [{'params': encoder.parameters()},{'params': decoder.parameters()}]
-    optim = torch.optim.Adam(params_to_optimize, lr=lr, weight_decay=1e-05)
+    optim = torch.optim.Adam(params_to_optimize, lr=lr, weight_decay=wd)
     encoder, decoder, val_loss_epoch, train_loss_epoch = train_conv(encoder, decoder, train_loader,valid_loader, loss_fn, optim, num_epochs,flag_only_encoder)
     print_process(val_loss_epoch, train_loss_epoch, flag_only_encoder)
     return encoder, decoder, test_loader
@@ -316,13 +316,16 @@ if __name__ == '__main__':
     flag_only_encoder=False
     encoder, decoder, test_loader = training_AE_conv(flag_only_encoder)
     if flag_only_encoder:
-        torch.save(encoder, r".\saved_models\Only_conv_encoder.pt")
+        torch.save(encoder.state_dict(), r".\saved_models\Only_conv_encoder.pt")
     else:
-        torch.save(encoder, r".\saved_models\AutoEncoder_conv_encoder.pt")
-        torch.save(decoder, r".\saved_models\AutoEncoder_conv_decoder.pt")
+        torch.save(encoder.state_dict(), r".\saved_models\AutoEncoder_conv_encoder.pt")
+        torch.save(decoder.state_dict(), r".\saved_models\AutoEncoder_conv_decoder.pt")
 
-    encoder_loaded = torch.load(r".\saved_models\AutoEncoder_conv_encoder.pt")
-    decoder_loaded = torch.load(r".\saved_models\AutoEncoder_conv_decoder.pt")
+    encoder_loaded = Encoder(5)
+    encoder_loaded.load_state_dict(torch.load(r".\saved_models\AutoEncoder_conv_encoder.pt"))
+    decoder_loaded = Decoder(5)
+    decoder_loaded.load_state_dict(torch.load(r".\saved_models\AutoEncoder_conv_decoder.pt"))
+
     test_loss = test_epoch(encoder_loaded, decoder_loaded, test_loader, torch.nn.MSELoss(), 1, flag_only_encoder)
     print("Test loss is: {}".format(test_loss))
 

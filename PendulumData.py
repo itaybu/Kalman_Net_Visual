@@ -2,6 +2,7 @@ import numpy as np
 from PIL import Image
 from PIL import ImageDraw
 import ImgNoiseGeneration as noise_gen
+import torch
 
 
 class Pendulum:
@@ -272,14 +273,19 @@ if __name__ == '__main__':
                     pendulum_params=pend_params,
                     seed=0)
 
-    imgs, targets, states, noisy_targets = data.sample_data_set(500, 150, full_targets=False, seed=1)
-    noisy_samples, factors = data.add_observation_noise(imgs, 0)
+    training_input, targets, training_target, noisy_targets = data.sample_data_set(5000, 30, full_targets=False, seed=1)
+    cv_input, targets, cv_target, noisy_targets = data.sample_data_set(100, 30, full_targets=False, seed=2)
+    test_input, targets, test_target, noisy_targets = data.sample_data_set(100, 40, full_targets=False, seed=3)
 
-    np.savez(r".\Simulations\Pendulum\imgs", images=imgs)
-    np.savez(r".\Simulations\Pendulum\noisy_imgs", images=noisy_samples)
-    np.savez(r".\Simulations\Pendulum\targets", images=targets)
-    np.savez(r".\Simulations\Pendulum\noisy_targets", images=noisy_targets)
-    np.savez(r".\Simulations\Pendulum\states", images=states)
+    #noisy_samples, factors = data.add_observation_noise(imgs, 0)
+
+    torch.save([training_input, training_target.reshape((training_target.shape[0],2,30)), cv_input, cv_target.reshape((cv_target.shape[0],2,30)), test_input, test_target.reshape((test_target.shape[0],2,40))], r".\Simulations\Pendulum\y24x24_Ttrain30_NE1000_NCV100_NT100_Ttest40_pendulum.pt")
+
+    # np.savez(r".\Simulations\Pendulum\imgs", images=imgs)
+    # np.savez(r".\Simulations\Pendulum\noisy_imgs", images=noisy_samples)
+    # np.savez(r".\Simulations\Pendulum\targets", images=targets)
+    # np.savez(r".\Simulations\Pendulum\noisy_targets", images=noisy_targets)
+    # np.savez(r".\Simulations\Pendulum\states", images=states)
 
     print("done")
 

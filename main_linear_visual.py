@@ -8,7 +8,7 @@ from Extended_data_visual import N_E, N_CV, N_T, F, F_rotated, T, T_test, m1_0, 
 from visual_supplementary import y_size, check_changs
 from Pipeline_KF_visual import Pipeline_KF
 from KalmanNet_nn_visual import KalmanNetNN
-from main_AE import train_AE, Autoencoder
+from main_AE import Autoencoder, Encoder
 
 if torch.cuda.is_available():
    dev = torch.device("cuda:0")  # you can continue going on here, like cuda:1 cuda:2....etc.
@@ -17,7 +17,6 @@ if torch.cuda.is_available():
 else:
    dev = torch.device("cpu")
    print("Running on the CPU")
-
 
 print("Pipeline Start")
 ################
@@ -43,12 +42,24 @@ print("1/q2 [dB]: ", 10 * torch.log10(1/q2[0]))
 # True model
 r = torch.sqrt(r2)
 q = torch.sqrt(q2)
+sys_model = SystemModel(F, q, H_matrix_for_visual, r, T, T_test)
+sys_model.InitSequence(m1_0, m2_0)
 
+############ Hyper Parameters ##################
+learning_rate_list=[2e-5]
+weight_decay_list=[1e-4]
+fix_H_flag=True
+pendulum_data_flag=False
+encoded_dimention = 5
+################################################
+
+##### Load  Encoder Models ##################
 h_fully_connected = H_fully_connected(H_matrix_for_visual, b_for_visual)
 model_AE_trained = Autoencoder()
-model_AE_trained.load_state_dict(torch.load('saved_models/AE_model'))
-sys_model = SystemModel(F, q, 1, 1, r, T, T_test)
-sys_model.InitSequence(m1_0, m2_0)
+model_AE_trained.load_state_dict(torch.load('saved_models/AE_model_syntetic.pt'))
+model_AE_conv_trained = Encoder(encoded_dimention)
+model_AE_conv_trained.load_state_dict(torch.load('saved_models/AutoEncoder_conv_encoder.pt'))
+#################################
 
 # Mismatched model
 #sys_model_partialh = SystemModel(F, q, H_wrong_visual_function, r, T, T_test)
@@ -57,8 +68,14 @@ sys_model.InitSequence(m1_0, m2_0)
 ###################################
 ### Data Loader (Generate Data) ###
 ###################################
-dataFolderName = 'Simulations/Synthetic_visual' + '/'
-dataFileName = 'y{}x{}_Ttrain{}_NE{}_NCV{}_NT{}_Ttest{}_Sigmoid.pt'.format(y_size,y_size, T,N_E,N_CV,N_T, T_test)
+if pendulum_data_flag:
+   dataFolderName = 'Simulations/Pendulum' + '/'
+   dataFileName = 'y24x24_Ttrain30_NE1000_NCV100_NT100_Ttest40_pendulum.pt'
+   data_name = 'pendulum'
+else:
+   dataFolderName = 'Simulations/Synthetic_visual' + '/'
+   dataFileName = 'y{}x{}_Ttrain{}_NE{}_NCV{}_NT{}_Ttest{}_Sigmoid.pt'.format(y_size,y_size, T,N_E,N_CV,N_T, T_test)
+   data_name = 'syntetic'
 #print("Start Data Gen")
 #DataGen(sys_model, dataFolderName + dataFileName, T, T_test,randomInit=False)  # taking time
 print("Data Load")
@@ -89,30 +106,25 @@ print("testset size: x {} y {}".format(test_target.size(), test_input.size()))
 ##################
 print("Start KNet pipeline")
 modelFolder = 'KNet' + '/'
-KNet_Pipeline = Pipeline_KF(strTime, "KNet", "KalmanNet")
+KNet_Pipeline = Pipeline_KF(strTime, "KNet", "KalmanNet", data_name)
 KNet_Pipeline.setssModel(sys_model)
 
 KNet_model = KalmanNetNN()
-KNet_model.Build(sys_model,h_fully_connected,model_AE_trained)
+KNet_model.Build(sys_model,h_fully_connected)
 KNet_Pipeline.setModel(KNet_model)
-check_changs(KNet_Pipeline)
-
-############ Hyper Parameters ##################
-learning_rate_list=[1e-3,1e-4,1e-5]
-weight_decay_list=[1e-3,1e-4,1e-5]
-################################################
+check_changs(KNet_Pipeline, model_AE_trained,model_AE_conv_trained, pendulum_data_flag )
 
 for lr in learning_rate_list:
    for wd in weight_decay_list:
-      KNet_Pipeline.setTrainingParams(n_Epochs=500, n_Batch=64, learningRate=lr, weightDecay=wd)
-      # KNet_Pipeline.model = torch.load(modelFolder+"model_KNet.pt")
-      title="LR: {} Weight Decay: {}".format(lr,wd)
+      KNet_Pipeline.setTrainingParams(fix_H_flag, pendulum_data_flag, n_Epochs=300, n_Batch=64, learningRate=lr, weightDecay=wd)
+      #KNet_Pipeline.model = torch.load(modelFolder+"model_KNet.pt")
+      title="LR: {} Weight Decay: {} Data {}".format(lr,wd,data_name )
       print(title)
-      KNet_Pipeline.NNTrain(N_E, train_input, train_target, N_CV, cv_input, cv_target, title)
-      check_changs(KNet_Pipeline)
+      KNet_Pipeline.NNTrain(N_E, train_input, train_target, N_CV, cv_input, cv_target, title, model_AE_trained, model_AE_conv_trained)
+      check_changs(KNet_Pipeline, model_AE_trained, model_AE_conv_trained, pendulum_data_flag )
 
 #Test
-[KNet_MSE_test_linear_arr, KNet_MSE_test_linear_avg, KNet_MSE_test_dB_avg, KNet_test] = KNet_Pipeline.NNTest(N_T, test_input, test_target)
+[KNet_MSE_test_linear_arr, KNet_MSE_test_linear_avg, KNet_MSE_test_dB_avg, KNet_test] = KNet_Pipeline.NNTest(N_T, test_input, test_target, model_AE_trained, model_AE_conv_trained)
 KNet_Pipeline.save()
 
 
